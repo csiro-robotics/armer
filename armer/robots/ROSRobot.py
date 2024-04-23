@@ -1541,13 +1541,18 @@ class ROSRobot(rtb.Robot):
         :return: an empty response
         :rtype: EmptyResponse
         """
+        #self.general_executor(q=self.q, collision_ignore=True, workspace_ignore=True)
+        rospy.loginfo(f"[RECOVER CB] -> Resetting from {self._controller_mode} state to JOINTS [Default]")
+        self._controller_mode = ControlMode.JOINTS
+        self.preempted = False
+
         # Recover from Error if set (basic functionality)
-        if self._controller_mode == ControlMode.ERROR:
-            rospy.loginfo(f"[RECOVER CB] -> Resetting from ERROR state to JOINTS [Default]")
-            self._controller_mode = ControlMode.JOINTS
-            self.preempted = False
-        else:
-            rospy.logwarn(f'RECOVER CB] -> Robot [{self.name}] not in ERROR state. Do Nothing.')
+        #if self._controller_mode == ControlMode.ERROR:
+        #    rospy.loginfo(f"[RECOVER CB] -> Resetting from ERROR state to JOINTS [Default]")
+        #    self._controller_mode = ControlMode.JOINTS
+        #    self.preempted = False
+        #else:
+        #    rospy.logwarn(f'RECOVER CB] -> Robot [{self.name}] not in ERROR state. Do Nothing.')
 
         return EmptyResponse()
     
