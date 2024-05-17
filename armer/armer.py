@@ -16,9 +16,10 @@ import roboticstoolbox as rtb
 import spatialmath as sm
 import timeit
 
+from sys import stderr
 from typing import List, Dict, Any, Tuple
 from armer.utils import populate_transform_stamped
-from armer.robots import ROSRobot
+from armer.robots import ROS2Robot
 # Add cython global checker
 from armer.cython import collision_handler
 
@@ -36,7 +37,7 @@ class Armer:
 
     def __init__(
             self,
-            nh=None,
+            node=None,
             robots: List[rtb.robot.Robot] = None,
             backend: rtb.backends.Connector = None,
             backend_args: Dict[str, Any] = None,
@@ -44,13 +45,16 @@ class Armer:
             publish_transforms: bool = False,
             logging: dict[str, bool] = None) -> None:
 
-        self.robots: List[ROSRobot] = robots
+        self.robots: List[ROS2Robot] = robots
         self.backend: rtb.backends.Connector = backend
         self.readonly_backends : List[rtb.backends.Connector] = readonly_backends \
             if readonly_backends else []
 
         if not self.robots:
-            self.robots = [ROSRobot(self, rtb.models.URDF.Panda())]
+            if self.node == None:
+              print("Using ROS2 Robots but no ROS2 Node provided, exiting", file=stderr)
+              return
+            self.robots = [ROS2Robot(self, node, rtb.models.URDF.Panda())]
 
         if not self.backend:
             self.backend = rtb.backends.swift.Swift()
@@ -61,7 +65,7 @@ class Armer:
 
         if self.is_publishing_transforms:
             try:
-              self.broadcaster = tf2_ros.TransformBroadcaster(nh)
+              self.broadcaster = tf2_ros.TransformBroadcaster(node)
             except TypeError:
               self.broadcaster = tf2_ros.TransformBroadcaster()
 
@@ -153,7 +157,7 @@ class Armer:
         self.broadcaster.sendTransform(transforms)
 
     @staticmethod
-    def load(nh, path: str) -> Armer:
+    def load(node, path: str) -> Armer:
         """Generates an Armer Driver instance from the configuration file at path
 
         :param path: The path to the configuration file
@@ -167,7 +171,7 @@ class Armer:
         robots: List[rtb.robot.Robot] = []
 
         for spec in config['robots']:
-            wrapper = ROSRobot
+            wrapper = ROS2Robot
 
             if 'type' in spec:
                 module_name, model_name = spec['type'].rsplit('.', maxsplit=1)
@@ -177,7 +181,13 @@ class Armer:
             if 'model' in spec:
               spec.update(spec['model'])
 
-            robots.append(wrapper(nh, **spec))
+            urdf_string = None
+            if wrapper == ROS2Robot and 'urdf_file' not in spec:
+                urdf_param_name = spec['name'] + '/robot_description'
+                node.declare_parameter(name=urdf_param_name, value="")
+                urdf_string = node.get_parameter(urdf_param_name).get_parameter_value().string_value
+
+            robots.append(wrapper(node, urdf_string=urdf_string, **spec))
 
         backend = None
         backend_args = dict()
@@ -202,7 +212,7 @@ class Armer:
         publish_transforms = config['publish_transforms'] if 'publish_transforms' in config else False
         
         return Armer(
-            nh=nh,
+            node=node,
             robots=robots,
             backend=backend,
             backend_args=backend_args,
@@ -211,7 +221,7 @@ class Armer:
             logging=logging
         )
     
-    def global_collision_check(self, robot: ROSRobot):
+    def global_collision_check(self, robot: ROS2Robot):
         """
         Conducts a full check for collisions
         NOTE: takes a given robot object and runs its collision check (of its own dictionary) against the global dictionary
@@ -286,7 +296,7 @@ class Armer:
             # No collisions found with no errors identified.
             return False
         
-    def update_dynamic_objects(self, robot: ROSRobot) -> None:
+    def update_dynamic_objects(self, robot: ROS2Robot) -> None:
         """
         method to handle the addition and removal of dynamic objects per robot instance
         """

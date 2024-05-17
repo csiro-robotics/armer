@@ -1,5 +1,5 @@
 """
-@author Gavin Suddrey
+@author Tea Molnar
 """
 
 import time
@@ -9,6 +9,7 @@ import os
 from roboticstoolbox.backends.Connector import Connector
 
 import armer
+
 
 class ROS(Connector):  # pragma nocover
     """
@@ -25,26 +26,12 @@ class ROS(Connector):  # pragma nocover
     #  Basic methods to do with the state of the external program
     #
 
-    def launch(self, roscore=False, ros_master_uri=None, ros_ip=None): # pylint: disable=arguments-differ
+    def launch(self): # pylint: disable=arguments-differ
         """
-        Launch the backend and establish any ROS connections
+        Launch the backend and establish any ROS2 connections
         """
-
         super().launch()
 
-        # Launch roscore in seperate process
-        if roscore:
-            print('Launching ROS core\n')
-            self.roscore = subprocess.Popen('roscore')
-
-            # Give it some time to launch
-            time.sleep(1)
-
-        if ros_master_uri:
-            os.environ["ROS_MASTER_URI"] = ros_master_uri
-
-        if ros_ip:
-            os.environ["ROS_IP"] = ros_ip
 
     #
     #  Methods to interface with the robots created in other environemnts
@@ -54,7 +41,7 @@ class ROS(Connector):  # pragma nocover
         """
         Add a robot to the environment
         """
-        if isinstance(ob, armer.robots.ROSRobot):
+        if isinstance(ob, armer.robots.ROS2Robot):
             self.robots[ob.name] = ob
 
         super().add()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""ROSRobot module defines the ROSRobot type
+"""ROS2Robot module defines the ROS2Robot type
 
 Defines the callbacks and underlying function to control a roboticstoolbox robot
 """
@@ -7,11 +7,12 @@ Defines the callbacks and underlying function to control a roboticstoolbox robot
 from __future__ import annotations
 
 __author__ = ['Gavin Suddrey', 'Dasun Gunasinghe']
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 import os
 import rclpy
 import tf2_ros
+
 import roboticstoolbox as rtb
 import spatialmath as sm
 import numpy as np
@@ -22,11 +23,13 @@ import json
 
 from typing import List, Any
 from threading import Lock, Event
+
 from armer.models.URDFRobot import URDFRobot
 from armer.utils import mjtg, trapezoidal, ikine
 from armer.errors import ArmerError
 from armer.trajectory import TrajectoryExecutor
 from armer.timer import Timer
+
 from rclpy.callback_groups import ReentrantCallbackGroup
 
 # pylint: disable=too-many-instance-attributes
@@ -67,12 +70,12 @@ class DynamicCollisionObj:
     pose: Pose = Pose()
     is_added: bool = False
 
-class ROSRobot(URDFRobot):
+class ROS2Robot(URDFRobot):
     """
     The ROSRobot class wraps the URDFRobot implementing basic ROS functionality
     """
     def __init__(self,
-                 nh=None,
+                 node,
                  name: str = None,
                  joint_state_topic: str = None,
                  joint_velocity_topic: str = None,
@@ -89,21 +92,26 @@ class ROSRobot(URDFRobot):
                  * args,
                  **kwargs):  # pylint: disable=unused-argument
         
-        super().__init__(nh, *args, **kwargs)
+        super().__init__(*args, **kwargs)
         
         # Setup the name of the robot
         self.name = name if name else self.name
+
+        # Reference to the ROS2 node class for this instance (usually the owner)
+        self.node = node
+        self.logger = node.get_logger()
+
         # Configure action servers with their required callback group
         self.action_cb_group = action_cb_group if action_cb_group else ReentrantCallbackGroup()
                 
         # Update with ustom qlim (joint limits) if specified in robot config
         if qlim_min and qlim_max:
             self.qlim = np.array([qlim_min, qlim_max])
-            self.logger(f"Updating Custom qlim: {self.qlim}")
+            self.log(f"Updating Custom qlim: {self.qlim}")
 
         if qdlim:
             self.qdlim = np.array(qdlim)
-            self.logger(f"Updating Custom qdlim: {self.qdlim}")
+            self.log(f"Updating Custom qdlim: {self.qdlim}")
         else:
             self.qdlim = None
 
@@ -137,7 +145,7 @@ class ROSRobot(URDFRobot):
         # Check if the existing gripper name exists (Error handling) otherwise default to top of dict stack
         if self.gripper not in self.link_dict.keys():
             default_top_link_name = sorted(self.link_dict.keys())[-1]
-            self.logger(f"Configured gripper name {self.gripper} not in link tree -> defaulting to top of stack: {default_top_link_name}")
+            self.log(f"Configured gripper name {self.gripper} not in link tree -> defaulting to top of stack: {default_top_link_name}")
             self.gripper = default_top_link_name
 
         # --- Collision Checking Setup Section --- #
@@ -182,22 +190,21 @@ class ROSRobot(URDFRobot):
         # Checks error of input from configuration file (note that default is current sorted links)
         self.collision_sliced_links = self.sorted_links
         self.update_link_collision_window()
+        
         # Initialise a 'ghost' robot instance for trajectory collision checking prior to execution
         # NOTE: Used to visualise the trajectory as a simple marker list in RVIZ for debugging
         # NOTE: there was an issue identified around using the latest franka-emika panda description
-        # self.logger(f"urdf filepath: {self.urdf_filepath}")
+        # self.log(f"urdf filepath: {self.urdf_filepath}")
+        kwargs["collision_check_start_link"] = self.collision_sliced_links[-1].name
+        kwargs["collision_check_stop_link"] = self.collision_sliced_links[0].name
         self.robot_ghost = URDFRobot(
-            nh=nh,
-            wait_for_description=False, 
-            gripper=self.gripper,
-            urdf_file=self.urdf_filepath,
-            collision_check_start_link=self.collision_sliced_links[-1].name, 
-            collision_check_stop_link=self.collision_sliced_links[0].name
+            * args,
+            ** kwargs,
         )
         if self.robot_ghost.is_valid():
-            self.logger(f"Robot Ghost Configured and Ready")
+            self.log(f"Robot Ghost Configured and Ready")
         else:
-            self.logger(f"Robot Ghost Invalid -> Cannot Conduct Trajectory Collision Checking", 'warn')
+            self.log(f"Robot Ghost Invalid -> Cannot Conduct Trajectory Collision Checking", 'warn')
         
         # Collision Safe State Window
         # NOTE: the size of the window (default of 200) dictates how far back we move to get out
@@ -219,7 +226,7 @@ class ROSRobot(URDFRobot):
         self.frequency = frequency if frequency else self.get_parameter(
           f'{self.joint_state_topic}/frequency', 500
         )
-        self.logger(f"Configured frequency (step): {self.frequency}")
+        self.log(f"Configured frequency (step): {self.frequency}")
         
         # Setup the robot's default ready state (or modified if specified)
         self.q = self.qr if hasattr(self, 'qr') else self.q # pylint: disable=no-member
@@ -268,10 +275,7 @@ class ROSRobot(URDFRobot):
 
         # Configure ROS transform buffer and listener
         self.tf_buffer = tf2_ros.Buffer()
-        if hasattr(self.nh, 'get_clock'):
-          self.tf_listener = tf2_ros.transform_listener.TransformListener(self.tf_buffer, self.nh)
-        else:
-          self.tf_listener = tf2_ros.transform_listener.TransformListener(self.tf_buffer)
+        self.tf_listener = tf2_ros.transform_listener.TransformListener(self.tf_buffer, self.node)
 
         self.readonly = readonly
 
@@ -279,7 +283,7 @@ class ROSRobot(URDFRobot):
 
         # Singularity index threshold (0 is a sigularity)
         # NOTE: this is a tested value and may require configuration (i.e., speed of robot)
-        self.logger(f"Singularity Scalar Threshold set to: {singularity_thresh}")
+        self.log(f"Singularity Scalar Threshold set to: {singularity_thresh}")
         self.singularity_thresh = singularity_thresh 
         self.manip_scalar = None
         self.singularity_approached = False
@@ -288,7 +292,7 @@ class ROSRobot(URDFRobot):
         self.__load_named_pose_config()
 
         #### --- ROS SETUP --- ###
-        self.nh.create_subscription(
+        self.node.create_subscription(
           JointState,
           self.joint_state_topic,
           self.robot_state_cb,
@@ -299,36 +303,36 @@ class ROSRobot(URDFRobot):
         if not self.readonly:
             # -- Publishers -- #
             # NOTE: the joint publisher topic should attach to the ros_control input for real robot
-            self.joint_publisher = self.nh.create_publisher(
+            self.joint_publisher = self.node.create_publisher(
                 Float64MultiArray,
                 self.joint_velocity_topic,
                 1
             )
-            self.state_publisher = self.nh.create_publisher(
+            self.state_publisher = self.node.create_publisher(
                 ManipulatorState, 
                 '{}/state'.format(self.name.lower()), 
                 1
             )
-            self.cartesian_servo_publisher = self.nh.create_publisher(
+            self.cartesian_servo_publisher = self.node.create_publisher(
                 Bool, 
                 '{}/cartesian/servo/arrived'.format(self.name.lower()), 
                 1
             )
                     
             # -- Subscribers -- #
-            self.cartesian_velocity_subscriber = self.nh.create_subscription(
+            self.cartesian_velocity_subscriber = self.node.create_subscription(
                 TwistStamped,
                 '{}/cartesian/velocity'.format(self.name.lower()), 
                 self.cartesian_velocity_cb,
                 10
             )
-            self.joint_velocity_subscriber = self.nh.create_subscription(
+            self.joint_velocity_subscriber = self.node.create_subscription(
                 JointVelocity,
                 '{}/joint/velocity'.format(self.name.lower()), 
                 self.joint_velocity_cb,
                 10
             )
-            self.cartesian_servo_subscriber = self.nh.create_subscription(
+            self.cartesian_servo_subscriber = self.node.create_subscription(
                 ServoStamped,
                 '{}/cartesian/servo'.format(self.name.lower()), 
                 self.servo_cb,
@@ -337,35 +341,35 @@ class ROSRobot(URDFRobot):
 
             # -- Action Servers -- #
             self.move_pose_action = rclpy.action.ActionServer(
-                node=self.nh,
+                node=self.node,
                 action_type=MoveToPose,
                 action_name='{}/cartesian/pose'.format(self.name.lower()),
                 execute_callback=self.cartesian_pose_cb,
                 callback_group=self.action_cb_group
             )
             self.home_action = rclpy.action.ActionServer(
-                node=self.nh,
+                node=self.node,
                 action_type=Home,
                 action_name='{}/home'.format(self.name.lower()),
                 execute_callback=self.home_cb,
                 callback_group=self.action_cb_group
             )
             self.guarded_velocity_action = rclpy.action.ActionServer(
-                node=self.nh,
+                node=self.node,
                 action_type=GuardedVelocity,
                 action_name='{}/cartesian/guarded_velocity'.format(self.name.lower()),
                 execute_callback=self.guarded_velocity_cb,
                 callback_group=self.action_cb_group
             )
             self.move_joint_action = rclpy.action.ActionServer(
-                node=self.nh,
+                node=self.node,
                 action_type=MoveToJointPose,
                 action_name='{}/joint/pose'.format(self.name.lower()),
                 execute_callback=self.joint_pose_cb,
                 callback_group=self.action_cb_group
             )
             self.move_named_pose_action = rclpy.action.ActionServer(
-                node=self.nh,
+                node=self.node,
                 action_type=MoveToNamedPose,
                 action_name='{}/joint/named'.format(self.name.lower()),
                 execute_callback=self.named_pose_cb,
@@ -373,32 +377,32 @@ class ROSRobot(URDFRobot):
             )
 
             # -- Services -- #
-            self.get_named_pose_srv = self.nh.create_service(
+            self.get_named_pose_srv = self.node.create_service(
                 GetNamedPoses, 
                 '{}/get_named_poses'.format(self.name.lower()), 
                 self.get_named_poses_cb
             )
-            self.set_named_pose_srv = self.nh.create_service(
+            self.set_named_pose_srv = self.node.create_service(
                 AddNamedPose, 
                 '{}/set_named_pose'.format(self.name.lower()), 
                 self.add_named_pose_cb
             )
-            self.remove_named_pose_srv = self.nh.create_service(
+            self.remove_named_pose_srv = self.node.create_service(
                 RemoveNamedPose, 
                 '{}/remove_named_pose'.format(self.name.lower()), 
                 self.remove_named_pose_cb
             )
-            self.add_named_pose_config_srv = self.nh.create_service(
+            self.add_named_pose_config_srv = self.node.create_service(
                 AddNamedPoseConfig, 
                 '{}/add_named_pose_config'.format(self.name.lower()), 
                 self.add_named_pose_config_cb
             )
-            self.remove_named_pose_config_srv = self.nh.create_service(
+            self.remove_named_pose_config_srv = self.node.create_service(
                 RemoveNamedPoseConfig, 
                 '{}/remove_named_pose_config'.format(self.name.lower()), 
                 self.remove_named_pose_config_cb
             )
-            self.get_named_pose_config_srv = self.nh.create_service(
+            self.get_named_pose_config_srv = self.node.create_service(
                 GetNamedPoseConfigs, 
                 '{}/get_named_pose_configs'.format(self.name.lower()), 
                 self.get_named_pose_configs_cb
@@ -426,7 +430,7 @@ class ROSRobot(URDFRobot):
         #     )
 
     # --------------------------------------------------------------------- #
-    # --------- ROS Topic Callback Methods -------------------------------- #
+    # --------- ROS 2 Topic Callback Methods ------------------------------ #
     # --------------------------------------------------------------------- #
     def robot_state_cb(self, msg):
         """ROS Robot State Callback
@@ -509,12 +513,18 @@ class ROSRobot(URDFRobot):
                 self.base_link.name
             )
             pose = goal_pose_stamped.pose
-            U = sm.UnitQuaternion([
-                pose.orientation.w,
-                pose.orientation.x,
-                pose.orientation.y,
-                pose.orientation.z
-            ]).SE3()
+
+            try:
+              U = sm.UnitQuaternion([
+                  pose.orientation.w,
+                  pose.orientation.x,
+                  pose.orientation.y,
+                  pose.orientation.z
+              ]).SE3()
+            except ValueError:
+              self.log("Invalid quaternion, ignoring servo command", "error")
+              return
+
             target = sm.SE3(pose.position.x, pose.position.y, pose.position.z) * U
 
             # Calculate joint velocities using servo feature
@@ -630,7 +640,7 @@ class ROSRobot(URDFRobot):
         action_result.success = result
 
         # DEBUGGING
-        # self.logger(f"action result: {action_result.success} | result: {result}")
+        # self.log(f"action result: {action_result.success} | result: {result}")
 
         return action_result
 
@@ -652,7 +662,7 @@ class ROSRobot(URDFRobot):
 
             # Handle user request joint array miss-match
             if len(self.q) != len(request.joints):
-                self.logger(f"Requested joints number miss-match: {len(request.joints)} | required: {len(self.q)}", 'error')
+                self.log(f"Requested joints number miss-match: {len(request.joints)} | required: {len(self.q)}", 'error')
                 goal_handle.abort()
                 result = False
             else:
@@ -680,7 +690,7 @@ class ROSRobot(URDFRobot):
         action_result.success = result
 
         # DEBUGGING
-        # self.logger(f"action result: {action_result.success} | result: {result}")
+        # self.log(f"action result: {action_result.success} | result: {result}")
 
         return action_result
 
@@ -701,7 +711,7 @@ class ROSRobot(URDFRobot):
         with self.lock:
             # Error handling on missing pose name
             if not request.pose_name in self.named_poses:
-                self.logger(f"Unknown named pose: {request.pose_name}", 'warn')
+                self.log(f"Unknown named pose: {request.pose_name}", 'warn')
                 result = False
                 goal_handle.abort()
 
@@ -731,7 +741,7 @@ class ROSRobot(URDFRobot):
         action_result.success = result
 
         # DEBUGGING
-        # self.logger(f"action result: {action_result.success} | result: {result}")
+        # self.log(f"action result: {action_result.success} | result: {result}")
 
         return action_result
 
@@ -776,7 +786,7 @@ class ROSRobot(URDFRobot):
         action_result.success = result
 
         # DEBUGGING
-        # self.logger(f"action result: {action_result.success} | result: {result}")
+        # self.log(f"action result: {action_result.success} | result: {result}")
 
         return action_result
 
@@ -834,7 +844,7 @@ class ROSRobot(URDFRobot):
         :rtype: AddNamedPoseResponse
         """
         if request.pose_name in self.named_poses and not request.overwrite:
-            self.logger('Named pose already exists.', 'warn')
+            self.log('Named pose already exists.', 'warn')
             response.success=False
         else:
             self.named_poses[request.pose_name] = self.q.tolist()
@@ -854,7 +864,7 @@ class ROSRobot(URDFRobot):
         :rtype: AddNamedPoseResponse
         """
         if request.pose_name not in self.named_poses and not request.overwrite:
-            self.logger('Named pose does not exists.', 'warn')
+            self.log('Named pose does not exists.', 'warn')
             response.success=False
         else:
             del self.named_poses[request.pose_name]
@@ -1106,7 +1116,7 @@ class ROSRobot(URDFRobot):
         """
         # Early termination
         if sliced_links == None or sliced_links == []:
-            self.logger(f"target links: {sliced_links} is not valid. Exiting...", 'error')
+            self.log(f"target links: {sliced_links} is not valid. Exiting...", 'error')
             return []
 
         # print(f"cylinder link check: {self.link_dict['cylinder_link']}")
@@ -1118,7 +1128,7 @@ class ROSRobot(URDFRobot):
         for sliced_link in sliced_links:
             # Early termination on error
             if sliced_link.name not in self.link_dict.keys():
-                self.logger(f"Given sliced link: {sliced_link.name} is not valid. Skipping...", 'error')
+                self.log(f"Given sliced link: {sliced_link.name} is not valid. Skipping...", 'error')
                 continue
 
             # Testing refinement using link poses (Individual method needed for shape-based version)
@@ -1182,7 +1192,7 @@ class ROSRobot(URDFRobot):
         marker_traj.points = []
         self.display_traj_publisher.publish(marker_traj)
 
-        self.logger(f"Traj len: {len(traj.s)} | with step value: {step_value}")
+        self.log(f"Traj len: {len(traj.s)} | with step value: {step_value}")
         go = True
         with Timer("Full Trajectory Collision Check", enabled=True):
             for idx in range(0,len(traj.s),step_value):
@@ -1251,7 +1261,7 @@ class ROSRobot(URDFRobot):
                 # print(f"Checking [{link}] -> links in collision: {links_in_collision}")
                 
                 if len(links_in_collision) > 0:
-                    self.logger(f"Collision at state {self.robot_ghost.q} in trajectory between -> [{link}] and {[link_n for link_n in links_in_collision]}", 'error')
+                    self.log(f"Collision at state {self.robot_ghost.q} in trajectory between -> [{link}] and {[link_n for link_n in links_in_collision]}", 'error')
                     go_signal = False
                     break
 
@@ -1280,7 +1290,7 @@ class ROSRobot(URDFRobot):
 
                 # Terminate early on invalid indexes
                 if start_idx < end_idx or start_idx > len(self.sorted_links):
-                    self.logger(f"Start and End idx are incompatible, defaulting to full link list", 'warn')
+                    self.log(f"Start and End idx are incompatible, defaulting to full link list", 'warn')
                     return 
 
                 # Handle end point
@@ -1292,7 +1302,7 @@ class ROSRobot(URDFRobot):
                 # Reverse order for sorting from start to end
                 self.collision_sliced_links.reverse()    
 
-                self.logger(f"Collision Link Window Set: {[link.name for link in self.collision_sliced_links]}")
+                self.log(f"Collision Link Window Set: {[link.name for link in self.collision_sliced_links]}")
             else:
                 # Defaul to the current list of sorted links (full)
                 self.collision_sliced_links = self.sorted_links
@@ -1311,17 +1321,17 @@ class ROSRobot(URDFRobot):
         with Timer(name="Characterise Collision Overlaps", enabled=True):
             # Error handling on gripper name
             if self.gripper == None or self.gripper == "":
-                self.logger(f"Characterise Collision Overlaps -> gripper name is invalid: {self.gripper}", 'error')
+                self.log(f"Characterise Collision Overlaps -> gripper name is invalid: {self.gripper}", 'error')
                 return False 
             
             # Error handling on empty lick dictionary (should never happen but just in case)
             if self.link_dict == dict() or self.link_dict == None:
-                self.logger(f"Characterise Collision Overlaps -> link dictionary is invalid: {self.link_dict}", 'error')
+                self.log(f"Characterise Collision Overlaps -> link dictionary is invalid: {self.link_dict}", 'error')
                 return False
             
             # Error handling on collision object dict
             if self.collision_dict == dict() or self.collision_dict == None:
-                self.logger(f"Characterise Collision Overlaps -> collision dictionary is invalid: [{self.collision_dict}]", 'error')
+                self.log(f"Characterise Collision Overlaps -> collision dictionary is invalid: [{self.collision_dict}]", 'error')
                 return False
             
             # Alternative Method (METHOD 2) that is getting the list in a faster iterative method
@@ -1349,7 +1359,7 @@ class ROSRobot(URDFRobot):
             self.overlapped_link_dict.update(gripper_dict)
 
             # using json.dumps() to Pretty Print O(n) time complexity
-            self.logger(f"Characterise Collision Overlaps per link: {json.dumps(self.overlapped_link_dict, indent=4)}")
+            self.log(f"Characterise Collision Overlaps per link: {json.dumps(self.overlapped_link_dict, indent=4)}")
 
         # Reached end in success
         return True
@@ -1372,7 +1382,7 @@ class ROSRobot(URDFRobot):
             
             # Handle invalid link name input
             if target_link == '' or target_link == None or not isinstance(target_link, str):
-                self.logger(f"Self Collision Check -> Link name [{target_link}] is invalid.", 'warn')
+                self.log(f"Self Collision Check -> Link name [{target_link}] is invalid.", 'warn')
                 return []
             
             # Handle check list empty scenario
@@ -1412,10 +1422,10 @@ class ROSRobot(URDFRobot):
         NOTE: archived for main usage, but available for one shot checks if needed
         """
         with Timer(name="OLD Check Link Collision", enabled=False):
-            self.logger(f"Target link requested is: {target_link}")
+            self.log(f"Target link requested is: {target_link}")
             # Handle invalid link name input
             if target_link == '' or target_link == None or not isinstance(target_link, str):
-                self.logger(f"Self Collision Check -> Link name [{target_link}] is invalid.", 'warn')
+                self.log(f"Self Collision Check -> Link name [{target_link}] is invalid.", 'warn')
                 return None, False
             
             # Handle check list empty scenario
@@ -1453,7 +1463,7 @@ class ROSRobot(URDFRobot):
                 for obj in check_list:
                     # rospy.logwarn(f"LOCAL CHECK for [{self.name}] -> Checking: {link.name}")
                     if link.iscollided(obj, skip=True):
-                        self.logger(f"Self Collision Check -> Link that is collided: {link.name}", 'error')
+                        self.log(f"Self Collision Check -> Link that is collided: {link.name}", 'error')
                         return link, True
                 
             return None, False
@@ -1565,7 +1575,7 @@ class ROSRobot(URDFRobot):
 
         if (np.fabs(self.manip_scalar) <= self.singularity_thresh and self.preempted == False):
             self.singularity_approached = True
-            self.logger(f"Preempted due to singularity {self.manip_scalar}", 'warn')
+            self.log(f"Preempted due to singularity {self.manip_scalar}", 'warn')
             return True
         else:
             self.singularity_approached = False
@@ -1758,26 +1768,17 @@ class ROSRobot(URDFRobot):
         return stamped_message
 
     def get_time(self, as_float=True):
-        if hasattr(self.nh, 'get_clock'):
-            if as_float:
-                return self.nh.get_clock().now().nanoseconds / 1e9
-            return self.nh.get_clock().now()
-        else:
-            if as_float:
-                return self.nh.get_time()
-            return self.nh.Time().now()
+          if as_float:
+              return self.node.get_clock().now().nanoseconds / 1e9
+          return self.node.get_clock().now()
 
     def get_stamp(self):
-        if hasattr(self.nh, 'get_clock'):
-            return self.nh.get_clock().now().to_msg()
-        return self.nh.Time.now()
+        return self.node.get_clock().now().to_msg()
 
     def get_parameter(self, param_name, default_value=None):
-        if hasattr(self.nh, 'get_parameter'):
-            if not self.nh.has_parameter(param_name):
-                self.nh.declare_parameter(param_name, default_value)
-            return self.nh.get_parameter(param_name).value
-        return self.nh.get_param(param_name, default_value)
+        if not self.node.has_parameter(param_name):
+            self.node.declare_parameter(param_name, default_value)
+        return self.node.get_parameter(param_name).value
 
     def __load_named_pose_config(self):
         """[summary]
@@ -1789,7 +1790,7 @@ class ROSRobot(URDFRobot):
                 if config and 'named_poses' in config:
                     self.named_poses.update(config['named_poses'])
             except IOError:
-                self.logger(
+                self.log(
                     'Unable to locate configuration file: {}'.format(config_name), 'warn'
                 )
 
@@ -1909,12 +1910,12 @@ class ROSRobot(URDFRobot):
                 self.j_v = np.linalg.pinv(self.jacob0(self.q, end=self.gripper)) @ e_v
               
             except (tf2_ros.LookupException, tf2_ros.ExtrapolationException):
-              self.logger('No valid transform found between {} and {}'.format(self.base_link.name, self.e_v_frame), 'warn')
+              self.log('No valid transform found between {} and {}'.format(self.base_link.name, self.e_v_frame), 'warn')
               self.preempt()
 
         ## -- TRAJECTORY-BASED EXECUTION UPDATE -- ##
         if self.executor:
-            # self.logger(f"Requested traj")
+            # self.log(f"Requested traj")
             self.j_v = self.executor.step(dt)  
         else:
             # Needed for preempting joint velocity control
@@ -1924,7 +1925,7 @@ class ROSRobot(URDFRobot):
         ## -- FINAL ROBOT JOINT VELOCITY UPDATE -- ##
         # NOTE: check for joint array length miss-match and handle
         if len(self.j_v) != len(self.qd):
-            self.logger(f"Incorrect velocity vector size {len(self.j_v)} | requires: {len(self.qd)}", 'warn')
+            self.log(f"Incorrect velocity vector size {len(self.j_v)} | requires: {len(self.qd)}", 'warn')
             self.preempt()
         else:
             self.qd = self.j_v

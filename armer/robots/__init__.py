@@ -3,8 +3,8 @@ Robots for Armer
 
 .. codeauthor:: Gavin Suddreys
 """
-from armer.robots.ROSRobot import ROSRobot
+from armer.robots.ROS2Robot import ROS2Robot
 
 __all__ = [
-    'ROSRobot'
+    'ROS2Robot'
 ]

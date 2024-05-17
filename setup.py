@@ -39,10 +39,8 @@ docs_req = [
 #     long_description = f.read()
 
 # list all data folders here, to ensure they get packaged
-
 data_folders = [
 ]
-
 
 def package_files(directory: List[str]) -> List[str]:
     """[summary]
@@ -91,6 +89,7 @@ setup(
         'Programming Language :: Python :: 3.7',
         'Programming Language :: Python :: 3.8',
         'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
     ],
     python_requires='>=3.6',
     project_urls={
@@ -103,9 +102,13 @@ setup(
              ' motion-planning trajectory-generation jacobian hessian' \
              ' control simulation robot-manipulator mobile-robot ros',
 
-    # packages=find_packages(exclude=['tests']),
-    packages=[package_name],
+    packages=find_packages(exclude=['tests']),
+    
+    # package_dir={"": package_name},
+    # packages=[package_name],
+
     package_data={'armer': extra_files},
+
     ext_modules=cythonize("armer/cython/*.pyx", annotate=True),
     include_package_data=True,
     install_requires=req,
@@ -113,16 +116,17 @@ setup(
         'dev': dev_req,
         'docs': docs_req
     },
+
     entry_points={
         'console_scripts': [
           'entry_point = armer.entry_point:main'
         ],
     },
+
     data_files=[
-        (os.path.join('share', package_name), ['package.xml']),
-        (os.path.join('share', package_name), glob('launch/*.launch.py')),
-        (os.path.join('share', package_name, 'cfg'), glob(os.path.join('cfg', '*'))),
-        ('share/ament_index/resource_index/packages',
-            ['resource/' + package_name]),
+        (('share/' + package_name, ['package.xml'])),
+        ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
+        (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*launch.[pxy][yma]*'))),
+        (os.path.join('share', package_name, 'cfg'), glob(os.path.join('cfg', '*')))
     ],
 )

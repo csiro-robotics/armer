@@ -34,8 +34,9 @@ class ArmerNode(Node):
     # NOTE: defaults to the panda simulation 
     #       attempts load from parameter or current path to panda simulation config (default)
     config = self.get_parameter('config').get_parameter_value().string_value
+
     self.armer = Armer.load(
-      self, 
+      self,
       config or os.path.join(__path__, 'cfg/panda_sim.yaml')
     )
 
@@ -46,6 +47,8 @@ class ArmerNode(Node):
       callback=self.timer_callback, 
       callback_group=ReentrantCallbackGroup()
     )
+    self.get_logger().info("Started Armer")
+
 
   def timer_callback(self):
     """
