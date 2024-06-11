@@ -157,10 +157,12 @@ class ROS2Robot(URDFRobot):
         #       the main self collision check can ignore these cases. 
         self.overlapped_link_dict = dict()
         self.collision_dict = dict()
+
         # This is a list of collision objects that is used by NEO
         # NOTE: this may not be explictly needed, as a list form (flattened) of the self.collision_dict.values() 
         #       contains the same information
         self.collision_obj_list = list()
+
         # Define a list of dynamic objects (to be added in at runtime)
         # NOTE: this is useful to include collision shapes (i.e., cylinders, spheres, cuboids) in your scene for collision checking
         self.dynamic_collision_dict = dict()
@@ -173,6 +175,7 @@ class ROS2Robot(URDFRobot):
             self.sorted_links.append(link)
             link=link.parent
         self.sorted_links.reverse()
+
         # Check for external links (from robot tree)
         # This is required to add any other links (not specifically part of the robot tree) 
         # to our collision dictionary for checking
@@ -190,7 +193,7 @@ class ROS2Robot(URDFRobot):
         # Checks error of input from configuration file (note that default is current sorted links)
         self.collision_sliced_links = self.sorted_links
         self.update_link_collision_window()
-        
+
         # Initialise a 'ghost' robot instance for trajectory collision checking prior to execution
         # NOTE: Used to visualise the trajectory as a simple marker list in RVIZ for debugging
         # NOTE: there was an issue identified around using the latest franka-emika panda description
@@ -224,7 +227,7 @@ class ROS2Robot(URDFRobot):
         # NOTE: defaulting to 500Hz
         # TODO: currently getting from a defined param - is this correct?
         self.frequency = frequency if frequency else self.get_parameter(
-          f'{self.joint_state_topic}/frequency', 500
+          f'{self.name}/frequency', 500
         )
         self.log(f"Configured frequency (step): {self.frequency}")
         
@@ -1391,8 +1394,9 @@ class ROS2Robot(URDFRobot):
                 return []
 
             # DEBUGGING
-            # rospy.loginfo(f"{target_link} has the following collision objects: {check_list}")
-            
+            # self.log(f"{target_link} has the following collision objects: {check_list}")
+            # self.log("target_link: {}, check_list: {}, link_list: {}".format(target_link, str(check_list), str(link_list)))
+
             # NOTE iterates over all configured links and compares against provided list of check shapes 
             # NOTE: the less objects in a check list, the better
             #       this is to handle cases (like with the panda) that has multiple shapes per link defining its collision geometry

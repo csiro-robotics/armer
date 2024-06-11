@@ -54,6 +54,7 @@ class URDFRobot(Robot):
       links, name, urdf_string, urdf_filepath = URDFRobot.URDF_read_string(urdf_string)
     else:
       self.log(f"No URDF Given", mode='error')
+      return
 
     # Error handling on URDF read failure
     if links == None:
