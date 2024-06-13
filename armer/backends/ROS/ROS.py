@@ -37,7 +37,8 @@ class ROS(Connector):  # pragma nocover
     #  Methods to interface with the robots created in other environemnts
     #
 
-    def add(self, ob): # pylint: disable=arguments-differ
+    def add(self, ob, collision_alpha=0.0): # pylint: disable=arguments-differ
+
         """
         Add a robot to the environment
         """

@@ -1715,9 +1715,9 @@ class ROS2Robot(URDFRobot):
         
         # joints
         if self.joint_states:
-            state.joint_poses = np.array(self.joint_states.position)[self.joint_indexes]
-            state.joint_velocities = np.array(self.joint_states.velocity)[self.joint_indexes]
-            state.joint_torques = np.array(self.joint_states.effort)[self.joint_indexes]
+            state.joint_poses = list(np.array(self.joint_states.position)[self.joint_indexes])
+            state.joint_velocities = list(np.array(self.joint_states.velocity)[self.joint_indexes])
+            state.joint_torques = list(np.array(self.joint_states.effort)[self.joint_indexes])
         
         else:
             state.joint_poses = list(self.q)
