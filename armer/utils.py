@@ -26,13 +26,13 @@ def ikine(robot, target, q0, end):
     )
     
     if not (result[1]):
-        robot.logger('Unable to generate inverse kinematic solution')
+        robot.log('Unable to generate inverse kinematic solution')
         return type('obj', (object,), {'q' : q0})
 
     return type('obj', (object,), {'q' : np.array(result[0])})
 
 def trapezoidal(robot: rtb.Robot, qf: np.ndarray, max_speed=None, frequency=500, move_time_sec: float=10):
-    robot.logger(f"NEW METHOD -> Trapezoidal Trajectory | move time: {move_time_sec}")
+    robot.log(f"NEW METHOD -> Trapezoidal Trajectory | move time: {move_time_sec}")
 
     # ------------ NOTE: determine a joint trajectory (curved) based on time request
     # Solve a trapezoidal trajectory in joint space based on provided solution based on defined number of steps (t)
@@ -47,15 +47,15 @@ def trapezoidal(robot: rtb.Robot, qf: np.ndarray, max_speed=None, frequency=500,
         # return the generated trajectory scaled with expected speed/time
         return Trajectory(name='trapezoidal-v1', t=move_time_sec, s=traj.q, sd=scaled_qd, sdd=None, istime=True)
     else:
-        robot.logger(f"Trajectory is invalid --> Cannot Solve. Given Move Time: [{move_time_sec}] | max qd: {np.max(traj.qd)}")
+        robot.log(f"Trajectory is invalid --> Cannot Solve. Given Move Time: [{move_time_sec}] | max qd: {np.max(traj.qd)}")
         return Trajectory(name='invalid', t=1, s=robot.q, sd=None, sdd=None, istime=False)
 
 def mjtg(robot: rtb.robot, qf: np.ndarray, max_speed: float=0.2, max_rot: float=0.5, frequency=500):
     # This is the average cartesian speed we want the robot to move at
     # NOTE: divided by approx. 2 to make the max speed the approx. peak of the speed achieved
     # TODO: investigate a better approximation strategy here
-    robot.logger("DEPRECATED - please use trapezoidal")
-    robot.logger("Attempting to produce a mjtg tragectory")
+    robot.log("DEPRECATED - please use trapezoidal")
+    robot.log("Attempting to produce a mjtg tragectory")
     ave_cart_speed = max_speed / 1.92
 
     #---------------- Calculate Linear move time estimate (3 point sampling)
@@ -89,10 +89,10 @@ def mjtg(robot: rtb.robot, qf: np.ndarray, max_speed: float=0.2, max_rot: float=
     #---------------- End
 
     move_time = max(linear_move_time, angular_move_time)
-    robot.logger(f'Estimated move time of {move_time} (max of) | lin {linear_move_time} | ang {angular_move_time}')
+    robot.log(f'Estimated move time of {move_time} (max of) | lin {linear_move_time} | ang {angular_move_time}')
     # Edited as part of branch hotfix/96fd293: termination on invalid trajectory
     if move_time == 0:
-        robot.logger(f"Trajectory is invalid --> Cannot Solve.", 'error')
+        robot.log(f"Trajectory is invalid --> Cannot Solve.", 'error')
         return Trajectory(name='invalid', t=1, s=robot.q, sd=None, sdd=None, istime=False)
 
     # Obtain minimum jerk velocity profile of joints based on estimated end effector move time
@@ -127,7 +127,7 @@ def mjtg(robot: rtb.robot, qf: np.ndarray, max_speed: float=0.2, max_rot: float=
             - 60.0 * (time/timefreq)**3.0
             + 30.0 * (time/timefreq)**4.0))
     
-    robot.logger(f"RETURNING a mjtg tragectory - len q {len(q)}, len qd {len(qd)}")
+    robot.log(f"RETURNING a mjtg tragectory - len q {len(q)}, len qd {len(qd)}")
     return Trajectory(name='minimum-jerk', t=move_time, s=q, sd=qd, sdd=None, istime=True)
 
 def populate_transform_stamped(parent_name: str, link_name: str, transform: np.array, timestamp):

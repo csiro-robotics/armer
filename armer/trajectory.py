@@ -67,7 +67,7 @@ class TrajectoryExecutor:
     
     # corr_jv = np.zeros(self.robot.n)
     if np.any(np.max(np.fabs(erro_jp)) > 0.5):
-        self.robot.logger('Exceeded delta joint position max', 'warn')
+        self.robot.log('Exceeded delta joint position max', 'warn')
         self._finished = True
         
     # Increment time step(s)
@@ -92,16 +92,16 @@ class TrajectoryExecutor:
       return True
 
     if len(self.traj.s) < 2 or np.all(np.fabs(self.traj.s[-1] - self.robot.q) < cutoff):
-      self.robot.logger(f'Too close to goal {(self.time_step / self.traj.t)}')
+      self.robot.log(f'Too close to goal {(self.time_step / self.traj.t)}')
       if self.cartesian_ee_vel_vect:
-        self.robot.logger(f"Max cartesian speed: {np.max(self.cartesian_ee_vel_vect)}")
+        self.robot.log(f"Max cartesian speed: {np.max(self.cartesian_ee_vel_vect)}")
       self._finished = True
       self._success = True
     
     if (self.time_step) >= self.traj.t - (1 if not self.traj.istime else 0):
-      self.robot.logger(f'Timed out | End time: {self.time_step}')
+      self.robot.log(f'Timed out | End time: {self.time_step}')
       if self.cartesian_ee_vel_vect:
-        self.robot.logger(f"Max cartesian speed: {np.max(self.cartesian_ee_vel_vect)}")
+        self.robot.log(f"Max cartesian speed: {np.max(self.cartesian_ee_vel_vect)}")
       self._finished = True
       self._success = True
       
